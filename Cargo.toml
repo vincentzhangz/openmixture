@@ -1,0 +1,17 @@
+[package]
+name = "openmixture"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ffmpeg-next = "8"
+glyphon = "0.10"
+iced = { version = "0.14", features = [
+    "tokio",
+    "wgpu",
+    "canvas",
+    "image",
+    "svg",
+    "advanced",
+] }
+iced_font_awesome = "0.4.2"

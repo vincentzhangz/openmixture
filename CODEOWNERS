@@ -1,0 +1,34 @@
+# CODEOWNERS
+# Each line is a file pattern followed by one or more owners.
+# Owners are notified when a pull request modifies the matching files.
+# The last matching rule takes precedence.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default — all files
+*                               @vincentzhangz
+
+# CI / build infrastructure
+.github/                        @vincentzhangz
+Cargo.toml                      @vincentzhangz
+build.rs                        @vincentzhangz
+
+# Core data model
+src/slides/                     @vincentzhangz
+src/db/                         @vincentzhangz
+
+# Rendering pipeline
+src/render/                     @vincentzhangz
+src/ndi/                        @vincentzhangz
+
+# Import / export
+src/import/                     @vincentzhangz
+
+# Media layer
+src/media/                      @vincentzhangz
+src/recording/                  @vincentzhangz
+
+# Trigger / automation system
+src/triggers/                   @vincentzhangz
+
+# UI
+src/ui/                         @vincentzhangz

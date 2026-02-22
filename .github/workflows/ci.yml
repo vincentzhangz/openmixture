@@ -1,0 +1,161 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel in-flight runs for the same ref so we don't waste CI minutes on
+# superseded commits.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Restrict default token permissions to the minimum needed.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CACHE_VERSION: v4
+
+jobs:
+  # ── Format ────────────────────────────────────────────────────────────────
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable + rustfmt)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+  # ── Clippy ────────────────────────────────────────────────────────────────
+  clippy:
+    name: Clippy
+    runs-on: macos-latest # wgpu/Metal requires macOS in CI
+    needs: [fmt]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable + clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Install system dependencies (macOS)
+        run: |
+          brew install ffmpeg
+          echo "FFMPEG_DIR=$(brew --prefix ffmpeg)" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$(brew --prefix ffmpeg)/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - name: Restore cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ env.CACHE_VERSION }}-${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-${{ runner.os }}-cargo-clippy-
+            ${{ env.CACHE_VERSION }}-${{ runner.os }}-cargo-
+
+      - name: Clippy (warnings-as-errors, no NDI SDK)
+        run: cargo clippy --no-default-features -- -D warnings
+
+  # ── Tests ─────────────────────────────────────────────────────────────────
+  test:
+    name: Tests
+    runs-on: macos-latest # wgpu/Metal requires macOS in CI
+    needs: [fmt] # Don't burn minutes on unformatted code
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies (macOS)
+        run: |
+          brew install ffmpeg
+          echo "FFMPEG_DIR=$(brew --prefix ffmpeg)" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$(brew --prefix ffmpeg)/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - name: Restore cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ env.CACHE_VERSION }}-${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-${{ runner.os }}-cargo-test-
+            ${{ env.CACHE_VERSION }}-${{ runner.os }}-cargo-
+
+      - name: Install cargo-nextest and cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest,cargo-llvm-cov
+
+      - name: Run tests with coverage (no NDI SDK)
+        run: cargo llvm-cov nextest --no-default-features --profile ci --lcov --output-path lcov.info
+
+      - name: Update test and coverage badges
+        if: always() && github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: gaelgirodon/ci-badges-action@v1
+        with:
+          gist-id: 98482a1448f7b055a193c05f9acf683b
+          token: ${{ secrets.GIST_TOKEN }}
+
+  # ── Stub-mode build check ─────────────────────────────────────────────────
+  # Verify the codebase compiles cleanly on Linux without any platform SDK.
+  build-linux:
+    name: Build (Linux, no platform SDKs)
+    runs-on: ubuntu-latest
+    needs: [fmt]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libavcodec-dev libavdevice-dev libavfilter-dev \
+            libavformat-dev libavutil-dev \
+            libswscale-dev libswresample-dev \
+            libclang-dev \
+            libasound2-dev
+          for lib in libavcodec libavdevice libavfilter libavformat libavutil libswresample libswscale; do
+            sudo ln -sf /usr/include/x86_64-linux-gnu/$lib /usr/include/$lib
+          done
+
+      - name: Restore cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ env.CACHE_VERSION }}-${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-${{ runner.os }}-cargo-build-
+            ${{ env.CACHE_VERSION }}-${{ runner.os }}-cargo-
+
+      - name: Cargo check (no NDI SDK)
+        run: cargo check --no-default-features
